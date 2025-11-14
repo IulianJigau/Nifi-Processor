@@ -73,8 +73,7 @@ public class EvaluateHtml extends AbstractProcessor {
 
     public static final PropertyDescriptor DESTINATION = new PropertyDescriptor.Builder()
             .name("Destination")
-            .description("Indicates whether to write the elements as attributes in the current FlowFile or as content, "
-                    + "generating a new FlowFile for each property.")
+            .description("Indicates whether to write the elements as attributes or as content in form of an json array.")
             .required(true)
             .addValidator(StandardValidators.NON_BLANK_VALIDATOR)
             .allowableValues(Destination.ATTRIBUTE_VALUE, Destination.CONTENT_VALUE)
@@ -349,7 +348,7 @@ public class EvaluateHtml extends AbstractProcessor {
     public static class Destination {
         private static final String CONTENT = "FlowFile-Content";
         public static final AllowableValue CONTENT_VALUE =
-                new AllowableValue(CONTENT, CONTENT, "Write the elements as a json object in the FlowFile content");
+                new AllowableValue(CONTENT, CONTENT, "Write the elements as a json array in the FlowFile content");
 
         private static final String ATTRIBUTE = "FlowFile-Attribute";
         public static final AllowableValue ATTRIBUTE_VALUE =
