@@ -226,8 +226,8 @@ public class EvaluateHtml extends AbstractProcessor {
         if (destination.equals(Destination.CONTENT)) {
             flowFile = session.putAttribute(flowFile, "mime.type", "application/json");
 
-            ObjectNode node = mapper.convertValue(attributes, ObjectNode.class);
-            String content = mapper.writeValueAsString(node);
+            Collection<String> values = attributes.values();
+            String content = mapper.writeValueAsString(values);
 
             session.write(flowFile, (out) -> out.write(content.getBytes(StandardCharsets.UTF_8)));
             provenance.modifyContent(flowFile, CONTENT_CHANGED_DESCRIPTION);
