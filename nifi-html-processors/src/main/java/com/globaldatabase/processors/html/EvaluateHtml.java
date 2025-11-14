@@ -224,6 +224,8 @@ public class EvaluateHtml extends AbstractProcessor {
         ProvenanceReporter provenance = session.getProvenanceReporter();
 
         if (destination.equals(Destination.CONTENT)) {
+            flowFile = session.putAttribute(flowFile, "mime.type", "application/json");
+
             ObjectNode node = mapper.convertValue(attributes, ObjectNode.class);
             String content = mapper.writeValueAsString(node);
 

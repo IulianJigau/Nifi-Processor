@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>HTML Test Page</title>
+    <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+<header id="main-header" class="header">
+    <h1 class="title">Test Page</h1>
+    <nav class="navbar" id="site-nav">
+        <ul class="nav-list">
+            <li class="nav-item"><a href="#section1" class="nav-link">Section 1</a></li>
+            <li class="nav-item"><a href="#section2" class="nav-link">Section 2</a></li>
+            <li class="nav-item"><a href="#section3" class="nav-link">Section 3</a></li>
+            <li class="nav-item"><a href="#footer" class="nav-link">Footer</a></li>
+        </ul>
+    </nav>
+</header>
+
+<main id="main-content" class="content">
+    <section id="section1" class="section highlight">
+        <h2 class="section-title">Section 1</h2>
+        <p class="text primary">This is a paragraph with some <strong>strong</strong> and <em>emphasized</em> text.</p>
+        <ul class="list-items">
+            <li class="item">Item A</li>
+            <li class="item">Item B</li>
+            <li class="item special">Item C (special)</li>
+        </ul>
+        <button class="btn primary-btn" id="button1">Click Me</button>
+    </section>
+
+    <section id="section2" class="section alternate">
+        <h2 class="section-title">Section 2</h2>
+        <article class="article" id="article1">
+            <h3 class="article-title">Nested Article</h3>
+            <p class="text secondary">Another paragraph inside an article.</p>
+            <input type="text" class="input-field" id="input1" placeholder="Enter text here..." />
+        </article>
+        <form class="form" id="form1">
+            <label for="email" class="label">Email:</label>
+            <input type="email" id="email" class="input-field email-input" />
+            <button type="submit" class="btn submit-btn">Submit</button>
+        </form>
+    </section>
+
+    <section id="section3" class="section">
+        <h2 class="section-title">Section 3</h2>
+        <div class="grid-container" id="grid1">
+            <div class="grid-item">Grid 1</div>
+            <div class="grid-item">Grid 2</div>
+            <div class="grid-item highlight">Grid 3 (highlighted)</div>
+        </div>
+        <img src="https://via.placeholder.com/150" alt="Placeholder" class="image" id="image1" />
+    </section>
+</main>
+
+<footer id="footer" class="footer">
+    <p class="footer-text">© 2025 Test Corp</p>
+    <a href="#main-header" class="back-to-top">Back to Top</a>
+</footer>
+</body>
+</html>
