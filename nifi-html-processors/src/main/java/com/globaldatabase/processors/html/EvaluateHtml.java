@@ -18,7 +18,6 @@ package com.globaldatabase.processors.html;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
-import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.apache.nifi.annotation.behavior.DynamicProperty;
 import org.apache.nifi.annotation.behavior.InputRequirement;
 import org.apache.nifi.annotation.behavior.SideEffectFree;
@@ -96,7 +95,7 @@ public class EvaluateHtml extends AbstractProcessor {
 
     public static final Relationship REL_NOT_FOUND = new Relationship.Builder()
             .name("not found")
-            .description("FlowFiles with no matching elements are routed to this relationship")
+            .description("FlowFiles with no matching elements for the root are sent to this relationship")
             .build();
 
     public static final Relationship REL_FAILURE = new Relationship.Builder()
@@ -311,11 +310,6 @@ public class EvaluateHtml extends AbstractProcessor {
 
         PropertyProcessor processor = new PropertyProcessor(root, attributes);
         useDynamicProperties(context, processor);
-
-        if (attributes.isEmpty()) {
-            session.transfer(flowFile, REL_NOT_FOUND);
-            return;
-        }
 
         resolveFlowFile(flowFile, session, attributes);
 

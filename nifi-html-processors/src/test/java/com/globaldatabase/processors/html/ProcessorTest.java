@@ -16,6 +16,7 @@
  */
 package com.globaldatabase.processors.html;
 
+import org.apache.nifi.processor.Relationship;
 import org.apache.nifi.util.MockFlowFile;
 import org.apache.nifi.util.TestRunner;
 import org.apache.nifi.util.TestRunners;
@@ -28,8 +29,7 @@ import java.io.File;
 import java.io.FileInputStream;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
-import java.util.HashMap;
-import java.util.Map;
+import java.util.List;
 
 public class ProcessorTest {
 
@@ -48,29 +48,38 @@ public class ProcessorTest {
         testRunner.setProperty(EvaluateHtml.SELECT_TEXT, "true");
         testRunner.setProperty(EvaluateHtml.DESTINATION, EvaluateHtml.Destination.CONTENT_VALUE.getValue());
         testRunner.setProperty(EvaluateHtml.NOT_FOUND_BEHAVIOUR, EvaluateHtml.NotFoundBehaviour.WARN_VALUE.getValue());
-        testRunner.setProperty("list", "li");
+        testRunner.setProperty("list", "abc");
 
         File file = new File("src/test/resources/test.html");
         try (InputStream inputStream = new FileInputStream(file)) {
-            Map<String, String> attributes = new HashMap<>();
-            testRunner.enqueue(inputStream, attributes);
+            testRunner.enqueue(inputStream);
         } catch (Exception e) {
             logger.error("Failed to import the test file", e);
         }
 
         testRunner.run();
 
-        for (MockFlowFile flowFile : testRunner.getFlowFilesForRelationship(EvaluateHtml.REL_SUCCESS)) {
-            System.out.println("Attributes:");
-            flowFile.getAttributes().forEach((k, v) -> System.out.println("  " + k + " = " + v));
+        for (Relationship rel : testRunner.getProcessor().getRelationships()) {
+            List<MockFlowFile> files = testRunner.getFlowFilesForRelationship(rel);
+            if (files.isEmpty()) continue;
 
-            System.out.println("Content:");
-            try {
-                String content = new String(flowFile.toByteArray(), StandardCharsets.UTF_8);
-                System.out.println(content);
-            } catch (Exception e) {
-                logger.error("Failed to read FlowFile content", e);
+            System.out.println("RELATIONSHIP: " + rel.getName());
+            for (MockFlowFile ff : files) {
+                System.out.println("FlowFile ID: " + ff.getAttribute("uuid"));
+
+                ff.getAttributes().forEach((k, v) -> System.out.println("  " + k + " = " + v));
+
+                try {
+                    String content = new String(ff.toByteArray(), StandardCharsets.UTF_8);
+                    System.out.println("Content:");
+                    System.out.println(content);
+                } catch (Exception e) {
+                    logger.error("Failed to read FlowFile content", e);
+                }
+
+                System.out.println();
             }
         }
     }
+
 }
