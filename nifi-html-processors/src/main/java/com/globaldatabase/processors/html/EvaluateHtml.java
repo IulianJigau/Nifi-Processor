@@ -241,8 +241,7 @@ public class EvaluateHtml extends AbstractProcessor {
 
     private String generateContent(Map<String, String> attributes) throws Exception {
         if (dynamicPropertiesCount > 1) {
-            Collection<String> values = attributes.values();
-            return mapper.writeValueAsString(values);
+            return mapper.writeValueAsString(mapper.valueToTree(attributes));
         } else if (attributes.size() == 1) {
             return attributes.values().iterator().next();
         }
@@ -376,11 +375,11 @@ public class EvaluateHtml extends AbstractProcessor {
         private static final String CONTENT = "FlowFile-Content";
         public static final AllowableValue CONTENT_VALUE =
                 new AllowableValue(CONTENT, CONTENT, "Write the elements in the FlowFile content. If more " +
-                        "than one property is specified, the elements will be written as a JSON array ");
+                        "than one property is specified, the elements will be written as a JSON node.");
 
         private static final String ATTRIBUTE = "FlowFile-Attribute";
         public static final AllowableValue ATTRIBUTE_VALUE =
-                new AllowableValue(ATTRIBUTE, ATTRIBUTE, "Write the elements as attributes");
+                new AllowableValue(ATTRIBUTE, ATTRIBUTE, "Write the elements as attributes.");
     }
 
     public static class NotFoundBehaviour {
