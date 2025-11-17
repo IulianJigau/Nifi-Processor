@@ -48,19 +48,9 @@ import java.util.*;
 @DynamicProperty(name = "The name of the attribute made from the extracted html element.",
         value = "The CSS property selector of the html element.",
         description = "Each property represents an element that will be extracted from the html contained in the "
-                + "FlowFile body.",
+                + "FlowFile body. If more elements are found on the same attribute, the output will be a json array.",
         expressionLanguageScope = ExpressionLanguageScope.NONE)
 public class EvaluateHtml extends AbstractProcessor {
-    public static final PropertyDescriptor SELECT_MULTIPLE = new PropertyDescriptor.Builder()
-            .name("Select Multiple Elements")
-            .description("Indicates whether to retrieve only the first element matching the selector or all the elements. "
-                    + "If select multiple option is enabled, the elements will be concatenated into a JSON array")
-            .required(true)
-            .addValidator(StandardValidators.BOOLEAN_VALIDATOR)
-            .allowableValues("true", "false")
-            .defaultValue("false")
-            .build();
-
     public static final PropertyDescriptor SELECT_TEXT = new PropertyDescriptor.Builder()
             .name("Select Element Text")
             .description("Indicates whether to retrieve the full html content of the element or only the text.")
@@ -72,7 +62,7 @@ public class EvaluateHtml extends AbstractProcessor {
 
     public static final PropertyDescriptor DESTINATION = new PropertyDescriptor.Builder()
             .name("Destination")
-            .description("Indicates whether to write the elements as attributes or as content in form of an json array.")
+            .description("Indicates whether to write the elements as attributes or as content.")
             .required(true)
             .addValidator(StandardValidators.NON_BLANK_VALIDATOR)
             .allowableValues(Destination.ATTRIBUTE_VALUE, Destination.CONTENT_VALUE)
@@ -106,7 +96,7 @@ public class EvaluateHtml extends AbstractProcessor {
     private static final String ATTRIBUTES_CHANGED_DESCRIPTION = "Placed the value of the extracted elements in the "
             + "FlowFile attributes";
     private static final String CONTENT_CHANGED_DESCRIPTION = "Replaced the FlowFile content with the extracted "
-            + "elements structured as a json object";
+            + "elements.";
 
     private static final Validator CSS_SELECTOR_VALIDATOR = new Validator() {
         private ValidationResult checkSelector(String name, String value) {
@@ -138,7 +128,6 @@ public class EvaluateHtml extends AbstractProcessor {
 
     private static final List<PropertyDescriptor> PROPERTY_DESCRIPTORS = List.of(
             ROOT_SELECTOR,
-            SELECT_MULTIPLE,
             SELECT_TEXT,
             DESTINATION,
             NOT_FOUND_BEHAVIOUR
@@ -152,10 +141,10 @@ public class EvaluateHtml extends AbstractProcessor {
 
     private static final ObjectMapper mapper = new ObjectMapper();
     private volatile String rootSelector;
-    private volatile boolean selectMultiple;
     private volatile boolean selectText;
     private volatile String destination;
     private volatile String notFoundBehaviour;
+    private volatile List<Property> dynamicProperties;
 
     private static ValidationResult getValidResult(String name) {
         return new ValidationResult.Builder()
@@ -209,13 +198,32 @@ public class EvaluateHtml extends AbstractProcessor {
                 .build();
     }
 
+    private List<Property> getDynamicProperties(ProcessContext context) {
+        List<Property> properties = new ArrayList<>();
+        for (PropertyDescriptor descriptor : context.getProperties().keySet()) {
+            if (descriptor.isDynamic()) {
+                properties.add(new Property(descriptor.getName(), context.getProperty(descriptor).getValue()));
+            }
+        }
+        return properties;
+    }
+
     @OnScheduled
     public void onScheduled(ProcessContext context) {
         rootSelector = context.getProperty(ROOT_SELECTOR).getValue();
-        selectMultiple = context.getProperty(SELECT_MULTIPLE).asBoolean();
         selectText = context.getProperty(SELECT_TEXT).asBoolean();
         destination = context.getProperty(DESTINATION).getValue();
         notFoundBehaviour = context.getProperty(NOT_FOUND_BEHAVIOUR).getValue();
+        dynamicProperties = getDynamicProperties(context);
+    }
+
+    private String generateContent(Map<String, String> attributes) throws Exception {
+        if (dynamicProperties.size() > 1) {
+            Collection<String> values = attributes.values();
+            return mapper.writeValueAsString(values);
+        } else {
+            return attributes.values().iterator().next();
+        }
     }
 
     private void resolveFlowFile(FlowFile flowFile, ProcessSession session, Map<String, String> attributes) throws Exception {
@@ -224,9 +232,7 @@ public class EvaluateHtml extends AbstractProcessor {
         if (destination.equals(Destination.CONTENT)) {
             flowFile = session.putAttribute(flowFile, "mime.type", "application/json");
 
-            Collection<String> values = attributes.values();
-            String content = mapper.writeValueAsString(values);
-
+            String content = generateContent(attributes);
             session.write(flowFile, (out) -> out.write(content.getBytes(StandardCharsets.UTF_8)));
             provenance.modifyContent(flowFile, CONTENT_CHANGED_DESCRIPTION);
         } else {
@@ -243,17 +249,21 @@ public class EvaluateHtml extends AbstractProcessor {
         }
     }
 
-    private String stringifyElements(Elements elements) throws Exception {
+    private String jsonifyElements(Elements elements) throws Exception {
+        ArrayNode jsonArray = mapper.createArrayNode();
+        for (Element element : elements) {
+            jsonArray.add(getValue(element));
+        }
+        return mapper.writeValueAsString(jsonArray);
+    }
+
+    private String processElements(Elements elements) throws Exception {
         if (elements.isEmpty()) {
             return null;
         }
 
-        if (selectMultiple) {
-            ArrayNode jsonArray = mapper.createArrayNode();
-            for (Element element : elements) {
-                jsonArray.add(getValue(element));
-            }
-            return mapper.writeValueAsString(jsonArray);
+        if (elements.size() > 1) {
+            return jsonifyElements(elements);
         } else {
             return getValue(elements.getFirst());
         }
@@ -269,12 +279,15 @@ public class EvaluateHtml extends AbstractProcessor {
         }
     }
 
-    private void useDynamicProperties(ProcessContext context, ExConsumer<Property> process) throws Exception {
-        for (PropertyDescriptor descriptor : context.getProperties().keySet()) {
-            if (descriptor.isDynamic()) {
-                Property property = new Property(descriptor.getName(), context.getProperty(descriptor).getValue());
-                process.accept(property);
+    private void extractElements(Element root, Map<String, String> attributes) throws Exception {
+        for (Property property : dynamicProperties) {
+            Elements matching = root.select(property.value());
+            if (matching.isEmpty()) {
+                doNotFoundBehaviour(property.name(), attributes);
+                return;
             }
+
+            attributes.put(property.name(), processElements(matching));
         }
     }
 
@@ -283,12 +296,7 @@ public class EvaluateHtml extends AbstractProcessor {
             return html;
         }
 
-        Elements matching = html.select(rootSelector);
-        if (matching.isEmpty()) {
-            return null;
-        }
-
-        return matching.getFirst();
+        return html.selectFirst(rootSelector);
     }
 
     private Element getFlowHtmlContent(ProcessSession session, FlowFile flowFile) throws Exception {
@@ -307,10 +315,7 @@ public class EvaluateHtml extends AbstractProcessor {
         }
 
         Map<String, String> attributes = new HashMap<>();
-
-        PropertyProcessor processor = new PropertyProcessor(root, attributes);
-        useDynamicProperties(context, processor);
-
+        extractElements(root, attributes);
         resolveFlowFile(flowFile, session, attributes);
 
         session.transfer(flowFile, REL_SUCCESS);
@@ -331,18 +336,14 @@ public class EvaluateHtml extends AbstractProcessor {
         }
     }
 
-    @FunctionalInterface
-    private interface ExConsumer<T> {
-        void accept(T input) throws Exception;
-    }
-
     private record Property(String name, String value) {
     }
 
     public static class Destination {
         private static final String CONTENT = "FlowFile-Content";
         public static final AllowableValue CONTENT_VALUE =
-                new AllowableValue(CONTENT, CONTENT, "Write the elements as a json array in the FlowFile content");
+                new AllowableValue(CONTENT, CONTENT, "Write the elements in the FlowFile content. If more " +
+                        "than one property is specified, the elements will be written as a JSON array ");
 
         private static final String ATTRIBUTE = "FlowFile-Attribute";
         public static final AllowableValue ATTRIBUTE_VALUE =
@@ -361,26 +362,5 @@ public class EvaluateHtml extends AbstractProcessor {
         private static final String SKIP = "Skip";
         public static final AllowableValue SKIP_VALUE =
                 new AllowableValue(SKIP, SKIP, "Excludes this attribute from the final result.");
-    }
-
-    private class PropertyProcessor implements ExConsumer<Property> {
-        private final Element root;
-        private final Map<String, String> attributes;
-
-        PropertyProcessor(Element root, Map<String, String> attributes) {
-            this.root = root;
-            this.attributes = attributes;
-        }
-
-        @Override
-        public void accept(Property property) throws Exception {
-            Elements matching = root.select(property.value());
-            if (matching.isEmpty()) {
-                doNotFoundBehaviour(property.name(), attributes);
-                return;
-            }
-
-            attributes.put(property.name(), stringifyElements(matching));
-        }
     }
 }
