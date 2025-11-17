@@ -43,11 +43,12 @@ public class ProcessorTest {
 
     @Test
     public void testProcessor() {
-        testRunner.setProperty(EvaluateHtml.ROOT_SELECTOR, "#main-content");
-        testRunner.setProperty(EvaluateHtml.SELECT_TEXT, "false");
+        testRunner.setProperty(EvaluateHtml.ROOT_SELECTOR, "//header[@id='main-header']");
+        testRunner.setProperty(EvaluateHtml.SELECT_TEXT, "true");
         testRunner.setProperty(EvaluateHtml.DESTINATION, EvaluateHtml.Destination.CONTENT_VALUE.getValue());
         testRunner.setProperty(EvaluateHtml.NOT_FOUND_BEHAVIOUR, EvaluateHtml.NotFoundBehaviour.WARN_VALUE.getValue());
-        testRunner.setProperty("list", "li.item.special");
+        testRunner.setProperty(EvaluateHtml.USE_XPATH, "true");
+        testRunner.setProperty("list", ".//li");
 
         File file = new File("src/test/resources/test.html");
         try (InputStream inputStream = new FileInputStream(file)) {

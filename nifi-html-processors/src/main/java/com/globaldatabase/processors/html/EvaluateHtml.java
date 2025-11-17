@@ -34,6 +34,7 @@ import org.apache.nifi.processor.Relationship;
 import org.apache.nifi.processor.util.StandardValidators;
 import org.apache.nifi.provenance.ProvenanceReporter;
 import org.jsoup.Jsoup;
+import org.jsoup.nodes.Document;
 import org.jsoup.nodes.Element;
 import org.jsoup.select.Elements;
 
@@ -78,6 +79,15 @@ public class EvaluateHtml extends AbstractProcessor {
             .defaultValue(NotFoundBehaviour.WARN_VALUE)
             .build();
 
+    public static final PropertyDescriptor USE_XPATH = new PropertyDescriptor.Builder()
+            .name("Use XPath")
+            .description("Indicates whether to evaluate the html content using XPath or JSoup CSS selector.")
+            .required(true)
+            .addValidator(StandardValidators.BOOLEAN_VALIDATOR)
+            .allowableValues("true", "false")
+            .defaultValue("false")
+            .build();
+
     public static final Relationship REL_SUCCESS = new Relationship.Builder()
             .name("success")
             .description("FlowFiles whose elements have been successfully extracted are routed to this relationship")
@@ -98,10 +108,20 @@ public class EvaluateHtml extends AbstractProcessor {
     private static final String CONTENT_CHANGED_DESCRIPTION = "Replaced the FlowFile content with the extracted "
             + "elements.";
 
-    private static final Validator CSS_SELECTOR_VALIDATOR = new Validator() {
-        private ValidationResult checkSelector(String name, String value) {
+    private static final Validator SELECTOR_VALIDATOR = new Validator() {
+
+        private void checkException(String value, boolean useXpath) {
+            Document doc = Jsoup.parse("");
+            if (useXpath) {
+                doc.selectXpath(value);
+            } else {
+                doc.select(value);
+            }
+        }
+
+        private ValidationResult validateSelector(String name, String value, boolean useXpath) {
             try {
-                Jsoup.parse("").select(value);
+                checkException(value, useXpath);
             } catch (Exception e) {
                 return getInvalidResult(name, e.getMessage());
             }
@@ -110,10 +130,11 @@ public class EvaluateHtml extends AbstractProcessor {
 
         @Override
         public ValidationResult validate(String name, String value, ValidationContext context) {
+            boolean useXPath = context.getProperty(USE_XPATH).asBoolean();
             if (context.isExpressionLanguagePresent(value)) {
                 return getValidResult(name);
             }
-            return checkSelector(name, value);
+            return validateSelector(name, value, useXPath);
         }
     };
 
@@ -122,7 +143,7 @@ public class EvaluateHtml extends AbstractProcessor {
             .description("Sets the selector of the root element from which to perform the search operation. If the root "
                     + "is not found, the FlowFile is routed to the not found relationship.")
             .required(false)
-            .addValidator(CSS_SELECTOR_VALIDATOR)
+            .addValidator(SELECTOR_VALIDATOR)
             .expressionLanguageSupported(ExpressionLanguageScope.NONE)
             .build();
 
@@ -130,7 +151,8 @@ public class EvaluateHtml extends AbstractProcessor {
             ROOT_SELECTOR,
             SELECT_TEXT,
             DESTINATION,
-            NOT_FOUND_BEHAVIOUR
+            NOT_FOUND_BEHAVIOUR,
+            USE_XPATH
     );
 
     private final static Set<Relationship> RELATIONSHIPS = Set.of(
@@ -144,7 +166,8 @@ public class EvaluateHtml extends AbstractProcessor {
     private volatile boolean selectText;
     private volatile String destination;
     private volatile String notFoundBehaviour;
-    private volatile List<Property> dynamicProperties;
+    private volatile boolean useXpath;
+    private volatile int dynamicPropertiesCount;
 
     private static ValidationResult getValidResult(String name) {
         return new ValidationResult.Builder()
@@ -159,6 +182,14 @@ public class EvaluateHtml extends AbstractProcessor {
                 .valid(false)
                 .explanation(message)
                 .build();
+    }
+
+    private Elements select(Element element, String selector) {
+        if (useXpath) {
+            return element.selectXpath(selector);
+        } else {
+            return element.select(selector);
+        }
     }
 
     @Override
@@ -192,20 +223,10 @@ public class EvaluateHtml extends AbstractProcessor {
         return new PropertyDescriptor.Builder()
                 .name(name)
                 .required(false)
-                .addValidator(CSS_SELECTOR_VALIDATOR)
+                .addValidator(SELECTOR_VALIDATOR)
                 .expressionLanguageSupported(ExpressionLanguageScope.NONE)
                 .dynamic(true)
                 .build();
-    }
-
-    private List<Property> getDynamicProperties(ProcessContext context) {
-        List<Property> properties = new ArrayList<>();
-        for (PropertyDescriptor descriptor : context.getProperties().keySet()) {
-            if (descriptor.isDynamic()) {
-                properties.add(new Property(descriptor.getName(), context.getProperty(descriptor).getValue()));
-            }
-        }
-        return properties;
     }
 
     @OnScheduled
@@ -214,16 +235,18 @@ public class EvaluateHtml extends AbstractProcessor {
         selectText = context.getProperty(SELECT_TEXT).asBoolean();
         destination = context.getProperty(DESTINATION).getValue();
         notFoundBehaviour = context.getProperty(NOT_FOUND_BEHAVIOUR).getValue();
-        dynamicProperties = getDynamicProperties(context);
+        useXpath = context.getProperty(USE_XPATH).asBoolean();
+        dynamicPropertiesCount = (int) context.getProperties().keySet().stream().filter(PropertyDescriptor::isDynamic).count();
     }
 
     private String generateContent(Map<String, String> attributes) throws Exception {
-        if (dynamicProperties.size() > 1) {
+        if (dynamicPropertiesCount > 1) {
             Collection<String> values = attributes.values();
             return mapper.writeValueAsString(values);
-        } else {
+        } else if (attributes.size() == 1) {
             return attributes.values().iterator().next();
         }
+        return "";
     }
 
     private void resolveFlowFile(FlowFile flowFile, ProcessSession session, Map<String, String> attributes) throws Exception {
@@ -279,15 +302,12 @@ public class EvaluateHtml extends AbstractProcessor {
         }
     }
 
-    private void extractElements(Element root, Map<String, String> attributes) throws Exception {
-        for (Property property : dynamicProperties) {
-            Elements matching = root.select(property.value());
-            if (matching.isEmpty()) {
-                doNotFoundBehaviour(property.name(), attributes);
-                return;
+    private void useDynamicProperties(ProcessContext context, ExConsumer<Property> process) throws Exception {
+        for (PropertyDescriptor descriptor : context.getProperties().keySet()) {
+            if (descriptor.isDynamic()) {
+                Property property = new Property(descriptor.getName(), context.getProperty(descriptor).getValue().trim());
+                process.accept(property);
             }
-
-            attributes.put(property.name(), processElements(matching));
         }
     }
 
@@ -296,7 +316,12 @@ public class EvaluateHtml extends AbstractProcessor {
             return html;
         }
 
-        return html.selectFirst(rootSelector);
+        Elements matched = select(html, rootSelector);
+        if (matched.isEmpty()) {
+            return null;
+        }
+
+        return matched.getFirst();
     }
 
     private Element getFlowHtmlContent(ProcessSession session, FlowFile flowFile) throws Exception {
@@ -315,7 +340,10 @@ public class EvaluateHtml extends AbstractProcessor {
         }
 
         Map<String, String> attributes = new HashMap<>();
-        extractElements(root, attributes);
+
+        PropertyProcessor processor = new PropertyProcessor(root, attributes);
+        useDynamicProperties(context, processor);
+
         resolveFlowFile(flowFile, session, attributes);
 
         session.transfer(flowFile, REL_SUCCESS);
@@ -334,6 +362,11 @@ public class EvaluateHtml extends AbstractProcessor {
             getLogger().error(e.getMessage());
             session.transfer(original, REL_FAILURE);
         }
+    }
+
+    @FunctionalInterface
+    private interface ExConsumer<T> {
+        void accept(T input) throws Exception;
     }
 
     private record Property(String name, String value) {
@@ -362,5 +395,26 @@ public class EvaluateHtml extends AbstractProcessor {
         private static final String SKIP = "Skip";
         public static final AllowableValue SKIP_VALUE =
                 new AllowableValue(SKIP, SKIP, "Excludes this attribute from the final result.");
+    }
+
+    private class PropertyProcessor implements ExConsumer<Property> {
+        private final Element root;
+        private final Map<String, String> attributes;
+
+        PropertyProcessor(Element root, Map<String, String> attributes) {
+            this.root = root;
+            this.attributes = attributes;
+        }
+
+        @Override
+        public void accept(Property property) throws Exception {
+            Elements matching = select(root, property.value());
+            if (matching.isEmpty()) {
+                doNotFoundBehaviour(property.name(), attributes);
+                return;
+            }
+
+            attributes.put(property.name(), processElements(matching));
+        }
     }
 }
